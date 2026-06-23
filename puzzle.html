@@ -3,458 +3,129 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Puzzle Cam</title>
+  <title>Hand Draw — Simple</title>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: monospace; color: #fff; }
 
-    body {
-      background: #000;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100dvh;
-      font-family: 'Courier New', monospace;
-      overflow: hidden;
-    }
+    #container { position: relative; width: 640px; height: 480px; }
+    canvas, video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
-    #wrapper {
-      position: relative;
-      width: 640px;
-      height: 480px;
-    }
+    /* La webcam se oculta — solo usamos su data */
+    #video { opacity: 0; transform: scaleX(-1); }
 
-    canvas { position: absolute; top: 0; left: 0; }
-
-    #hud {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 14px;
-    }
-
-    #state-label {
-      font-size: 11px;
-      letter-spacing: 3px;
-      color: rgba(255,255,255,0.5);
-      text-transform: uppercase;
-    }
-
-    #countdown {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 120px;
-      font-weight: 900;
-      color: rgba(255,255,255,0.08);
-      letter-spacing: -8px;
-      transition: color 0.1s;
-      pointer-events: none;
-    }
-
-    #controls {
-      position: absolute;
-      bottom: -40px;
-      left: 0; right: 0;
-      display: flex;
-      justify-content: center;
-      gap: 12px;
-    }
-
-    .ctrl-btn {
-      font-family: 'Courier New', monospace;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      padding: 7px 18px;
-      border: 1px solid #333;
-      background: transparent;
-      color: #555;
-      cursor: pointer;
-      text-transform: uppercase;
-      transition: all 0.15s;
-    }
-    .ctrl-btn:hover { border-color: #c8ff00; color: #c8ff00; }
-    .ctrl-btn.active { border-color: #c8ff00; color: #0a0a0a; background: #c8ff00; }
-
-    #grid-info {
-      position: absolute;
-      bottom: 14px; right: 14px;
-      font-size: 10px;
-      color: rgba(255,255,255,0.25);
-      letter-spacing: 1px;
-    }
+    #info { margin-top: 12px; font-size: 12px; color: #444; letter-spacing: 2px; }
+    #status { position: absolute; top: 12px; left: 12px; font-size: 11px; color: #555; letter-spacing: 2px; }
   </style>
 </head>
 <body>
 
-<div id="wrapper">
-  <canvas id="main" width="640" height="480"></canvas>
-  <canvas id="overlay" width="640" height="480"></canvas>
-
-  <div id="hud">
-    <div id="state-label">NORMAL</div>
-  </div>
-  <div id="countdown"></div>
-  <div id="grid-info">10×10</div>
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+  <!-- Canvas de trazos (persistente) -->
+  <canvas id="draw-canvas" width="640" height="480"></canvas>
+  <!-- Canvas de landmarks (se limpia cada frame) -->
+  <canvas id="guide-canvas" width="640" height="480"></canvas>
+  <div id="status">cargando...</div>
 </div>
-
-<div id="controls">
-  <button class="ctrl-btn active" onclick="changeGrid(10)">10×10</button>
-  <button class="ctrl-btn" onclick="changeGrid(16)">16×16</button>
-  <button class="ctrl-btn" onclick="changeGrid(20)">20×20</button>
-  <button class="ctrl-btn" onclick="toggleAuto()" id="btn-auto">AUTO ON</button>
-</div>
-
-<!-- Elementos ocultos -->
-<video id="v" autoplay playsinline muted style="display:none"></video>
-<canvas id="src" width="640" height="480" style="display:none"></canvas>
+<div id="info">ESPACIO = limpiar &nbsp;·&nbsp; mueve el índice para dibujar</div>
 
 <script>
+const video       = document.getElementById('video');
+const drawCanvas  = document.getElementById('draw-canvas');
+const guideCanvas = document.getElementById('guide-canvas');
+const dctx        = drawCanvas.getContext('2d');
+const gctx        = guideCanvas.getContext('2d');
+const statusEl    = document.getElementById('status');
+
 const W = 640, H = 480;
 
-const mainCanvas = document.getElementById('main');
-const ctx        = mainCanvas.getContext('2d');
-const overlayEl  = document.getElementById('overlay');
-const octx       = overlayEl.getContext('2d');
-const video      = document.getElementById('v');
-const src        = document.getElementById('src');
-const sctx       = src.getContext('2d');
-const stateLabel = document.getElementById('state-label');
-const countdownEl= document.getElementById('countdown');
-const gridInfoEl = document.getElementById('grid-info');
+let lastX = null, lastY = null;
+let hue = 0;
 
-// ── Configuración ────────────────────────────────────────────────────────────
-let COLS = 10, ROWS = 10;
-let BW, BH;
-let blocks = [];
+// Fondo negro inicial
+dctx.fillStyle = '#000';
+dctx.fillRect(0, 0, W, H);
 
-// Estados
-const STATES = ['NORMAL', 'EXPLODE', 'SHUFFLE', 'RECOMPOSE', 'GLITCH', 'SPIRAL'];
-let currentState = 0;
-let stateTimer = 0;
-let stateDuration = 150; // frames por estado
-let autoPlay = true;
-let frame = 0;
+function onResults(results) {
+  statusEl.textContent = results.multiHandLandmarks?.length ? 'MANO DETECTADA' : 'buscando mano...';
 
-// Efectos
-let glitchIntensity = 0;
-let vignetteAlpha = 0;
-let flashAlpha = 0;
-let countdownVal = 0;
+  // Limpiar canvas guía cada frame
+  gctx.clearRect(0, 0, W, H);
 
-function lerp(a, b, t) { return a + (b - a) * t; }
-function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
-function rand(min, max) { return Math.random() * (max - min) + min; }
-
-// ── Bloques ──────────────────────────────────────────────────────────────────
-function initBlocks() {
-  BW = W / COLS;
-  BH = H / ROWS;
-  blocks = [];
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      blocks.push({
-        srcX: c * BW, srcY: r * BH,
-        homeX: c * BW, homeY: r * BH,
-        x: c * BW, y: r * BH,
-        tx: c * BW, ty: r * BH,
-        rot: 0, trot: 0,
-        scale: 1, tscale: 1,
-        alpha: 1, talpha: 1,
-        delay: (r + c) * 1.5, // delay en cascada
-        vx: 0, vy: 0, // velocidad para física
-        col: c, row: r,
-        hue: (c / COLS) * 360
-      });
-    }
-  }
-}
-
-function changeGrid(n) {
-  COLS = n; ROWS = n;
-  gridInfoEl.textContent = n + '×' + n;
-  document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  initBlocks();
-  setState(0);
-}
-
-// ── Estados ──────────────────────────────────────────────────────────────────
-function setState(s) {
-  currentState = s;
-  stateTimer = 0;
-  stateLabel.textContent = STATES[s];
-
-  // Flash de transición
-  flashAlpha = 0.4;
-
-  if (s === 1) { // EXPLODE
-    blocks.forEach(b => {
-      b.tx = rand(-W * 0.5, W * 1.5);
-      b.ty = rand(-H * 0.5, H * 1.5);
-      b.trot = rand(-Math.PI, Math.PI);
-      b.tscale = rand(0.1, 1.8);
-      b.talpha = rand(0.3, 1);
-    });
-    stateDuration = 140;
-
-  } else if (s === 2) { // SHUFFLE
-    const positions = blocks.map(b => ({ x: b.homeX, y: b.homeY }));
-    for (let i = positions.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [positions[i], positions[j]] = [positions[j], positions[i]];
-    }
-    blocks.forEach((b, i) => {
-      b.tx = positions[i].x; b.ty = positions[i].y;
-      b.trot = 0; b.tscale = 1; b.talpha = 1;
-    });
-    stateDuration = 160;
-
-  } else if (s === 3) { // RECOMPOSE — regresa en ola
-    blocks.forEach((b, i) => {
-      b.tx = b.homeX; b.ty = b.homeY;
-      b.trot = 0; b.tscale = 1; b.talpha = 1;
-    });
-    stateDuration = 160;
-    // Cuenta regresiva
-    countdownVal = 3;
-    countdownEl.textContent = '3';
-
-  } else if (s === 4) { // GLITCH
-    stateDuration = 80;
-    glitchIntensity = 1;
-
-  } else if (s === 5) { // SPIRAL — bloques salen en espiral
-    const cx = W / 2, cy = H / 2;
-    blocks.forEach((b, i) => {
-      const angle = (i / blocks.length) * Math.PI * 6;
-      const radius = (i / blocks.length) * 400;
-      b.tx = cx + Math.cos(angle) * radius - BW/2;
-      b.ty = cy + Math.sin(angle) * radius - BH/2;
-      b.trot = angle;
-      b.tscale = clamp(1 - i / blocks.length * 0.8, 0.1, 1);
-      b.talpha = 1 - i / blocks.length * 0.5;
-    });
-    stateDuration = 180;
-
-  } else { // NORMAL
-    blocks.forEach(b => {
-      b.tx = b.homeX; b.ty = b.homeY;
-      b.trot = 0; b.tscale = 1; b.talpha = 1;
-    });
-    stateDuration = 120;
-    glitchIntensity = 0;
-    countdownEl.textContent = '';
-  }
-}
-
-function nextState() {
-  setState((currentState + 1) % STATES.length);
-}
-
-function toggleAuto() {
-  autoPlay = !autoPlay;
-  document.getElementById('btn-auto').textContent = autoPlay ? 'AUTO ON' : 'AUTO OFF';
-  document.getElementById('btn-auto').classList.toggle('active', autoPlay);
-}
-
-// ── Glitch ───────────────────────────────────────────────────────────────────
-function drawGlitch() {
-  if (glitchIntensity <= 0) return;
-  const intensity = glitchIntensity;
-
-  // Desplazamiento de canales RGB
-  const imgData = ctx.getImageData(0, 0, W, H);
-  const data = imgData.data;
-  const shifted = new Uint8ClampedArray(data);
-
-  const shift = Math.floor(rand(5, 30) * intensity);
-  for (let i = 0; i < data.length; i += 4) {
-    const px = (i / 4) % W;
-    if (px + shift < W) {
-      shifted[i]     = data[i + shift * 4];     // R desplazado
-      shifted[i + 2] = data[i - shift * 4] || 0; // B desplazado inverso
-    }
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    lastX = null; lastY = null;
+    return;
   }
 
-  // Líneas horizontales glitch
-  const numLines = Math.floor(rand(2, 8) * intensity);
-  for (let l = 0; l < numLines; l++) {
-    const y = Math.floor(rand(0, H));
-    const h = Math.floor(rand(2, 20));
-    const dx = Math.floor(rand(-40, 40) * intensity);
-    for (let row = y; row < Math.min(y + h, H); row++) {
-      for (let col = 0; col < W; col++) {
-        const src = ((row) * W + clamp(col + dx, 0, W-1)) * 4;
-        const dst = (row * W + col) * 4;
-        shifted[dst]   = data[src];
-        shifted[dst+1] = data[src+1];
-        shifted[dst+2] = data[src+2];
-      }
-    }
+  const hand = results.multiHandLandmarks[0];
+
+  // Punto 8 = punta del índice
+  // MediaPipe da coordenadas 0-1, hay que invertir X por el espejo
+  const tip = hand[8];
+  const x = (1 - tip.x) * W;
+  const y = tip.y * H;
+
+  // Dibujar trazo en el canvas persistente
+  hue = (hue + 1) % 360;
+  dctx.beginPath();
+  dctx.strokeStyle = `hsl(${hue}, 100%, 60%)`;
+  dctx.lineWidth = 3;
+  dctx.lineCap = 'round';
+  dctx.lineJoin = 'round';
+
+  if (lastX !== null) {
+    dctx.moveTo(lastX, lastY);
+    dctx.lineTo(x, y);
+    dctx.stroke();
   }
 
-  ctx.putImageData(new ImageData(shifted, W, H), 0, 0);
-  glitchIntensity = lerp(glitchIntensity, 0, 0.08);
+  lastX = x; lastY = y;
+
+  // Mostrar punto guía (cursor)
+  gctx.beginPath();
+  gctx.arc(x, y, 8, 0, Math.PI * 2);
+  gctx.fillStyle = `hsl(${hue}, 100%, 70%)`;
+  gctx.fill();
+
+  // Mostrar esqueleto de la mano (opcional)
+  drawConnectors(gctx, hand, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.15)', lineWidth: 1 });
 }
 
-// ── Vignette y flash ─────────────────────────────────────────────────────────
-function drawOverlay() {
-  octx.clearRect(0, 0, W, H);
-
-  // Flash blanco de transición
-  if (flashAlpha > 0.01) {
-    octx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
-    octx.fillRect(0, 0, W, H);
-    flashAlpha = lerp(flashAlpha, 0, 0.12);
-  }
-
-  // Vignette
-  const vg = octx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.8);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, `rgba(0,0,0,${0.5 + vignetteAlpha * 0.3})`);
-  octx.fillStyle = vg;
-  octx.fillRect(0, 0, W, H);
-
-  // Scanlines sutiles
-  if (currentState === 4) {
-    for (let y = 0; y < H; y += 3) {
-      octx.fillStyle = 'rgba(0,0,0,0.15)';
-      octx.fillRect(0, y, W, 1);
-    }
-  }
-
-  // Borde luminoso según estado
-  const colors = ['#333', '#ffaa00', '#00ffcc', '#c8ff00', '#ff3333', '#aa88ff'];
-  octx.strokeStyle = colors[currentState];
-  octx.lineWidth = 2;
-  octx.globalAlpha = 0.6;
-  octx.strokeRect(1, 1, W-2, H-2);
-  octx.globalAlpha = 1;
-}
-
-// ── Draw principal ────────────────────────────────────────────────────────────
-function draw() {
-  frame++;
-  stateTimer++;
-
-  // Capturar webcam (con espejo)
-  sctx.save();
-  sctx.translate(W, 0);
-  sctx.scale(-1, 1);
-  sctx.drawImage(video, 0, 0, W, H);
-  sctx.restore();
-
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, W, H);
-
-  // Velocidad de animación según estado
-  const speeds = [0.1, 0.055, 0.07, 0.085, 0.1, 0.06];
-  const sp = speeds[currentState];
-
-  // Orden de dibujo: en RECOMPOSE dibujar los que ya llegaron encima
-  const sorted = currentState === 3
-    ? [...blocks].sort((a, b) => {
-        const da = Math.abs(a.x - a.homeX) + Math.abs(a.y - a.homeY);
-        const db = Math.abs(b.x - b.homeX) + Math.abs(b.y - b.homeY);
-        return db - da;
-      })
-    : blocks;
-
-  sorted.forEach((b, i) => {
-    // Delay en cascada para RECOMPOSE
-    const effectiveSp = currentState === 3
-      ? clamp(sp * (1 + (1 - stateTimer / stateDuration) * 2), 0.02, 0.2)
-      : sp;
-
-    b.x     = lerp(b.x, b.tx, effectiveSp);
-    b.y     = lerp(b.y, b.ty, effectiveSp);
-    b.rot   = lerp(b.rot, b.trot, effectiveSp);
-    b.scale = lerp(b.scale, b.tscale, effectiveSp);
-    b.alpha = lerp(b.alpha, b.talpha, effectiveSp);
-
-    ctx.save();
-    ctx.globalAlpha = clamp(b.alpha, 0, 1);
-    ctx.translate(b.x + BW/2, b.y + BH/2);
-    ctx.rotate(b.rot);
-    ctx.scale(b.scale, b.scale);
-
-    // Filtros según estado
-    if (currentState === 2) {
-      ctx.filter = 'grayscale(1) contrast(1.3) brightness(0.9)';
-    } else if (currentState === 4) {
-      const hShift = Math.floor(rand(0, 40));
-      ctx.filter = `hue-rotate(${hShift}deg) saturate(2)`;
-    } else if (currentState === 5) {
-      ctx.filter = `brightness(${1.2 - b.tscale * 0.3}) saturate(1.5)`;
-    }
-
-    ctx.drawImage(src, b.srcX, b.srcY, BW, BH, -BW/2, -BH/2, BW, BH);
-    ctx.filter = 'none';
-
-    // Borde del bloque
-    if (currentState !== 0) {
-      const borderColors = ['', 'rgba(255,170,0,0.5)', 'rgba(0,255,200,0.4)', 'rgba(200,255,0,0.5)', 'rgba(255,50,50,0.6)', 'rgba(170,136,255,0.5)'];
-      ctx.strokeStyle = borderColors[currentState];
-      ctx.lineWidth = 0.8;
-      ctx.strokeRect(-BW/2, -BH/2, BW, BH);
-    }
-
-    ctx.restore();
-  });
-
-  // Efectos post-proceso
-  drawGlitch();
-  drawOverlay();
-
-  // Cuenta regresiva visual
-  if (currentState === 3 && countdownVal > 0) {
-    const progress = stateTimer / stateDuration;
-    if (progress > 0.33 && countdownVal === 3) { countdownVal = 2; countdownEl.textContent = '2'; }
-    if (progress > 0.66 && countdownVal === 2) { countdownVal = 1; countdownEl.textContent = '1'; }
-    if (progress > 0.95 && countdownVal === 1) { countdownVal = 0; countdownEl.textContent = ''; }
-
-    const pulse = 0.05 + Math.abs(Math.sin(frame * 0.08)) * 0.08;
-    countdownEl.style.color = `rgba(255,255,255,${pulse})`;
-  }
-
-  // Vigor de vignette según estado
-  vignetteAlpha = currentState === 1 || currentState === 5 ? lerp(vignetteAlpha, 0.5, 0.05) : lerp(vignetteAlpha, 0, 0.05);
-
-  // Cambio automático de estado
-  if (autoPlay && stateTimer > stateDuration) nextState();
-
-  requestAnimationFrame(draw);
-}
-
-// ── Iniciar ──────────────────────────────────────────────────────────────────
-async function start() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: W }, height: { ideal: H }, facingMode: 'user' },
-      audio: false
-    });
-    video.srcObject = stream;
-    await new Promise(r => video.onloadedmetadata = r);
-    initBlocks();
-    draw();
-  } catch(e) {
-    document.body.innerHTML = `<p style="color:#ff4040;font-family:monospace;padding:2rem">Error: no se pudo acceder a la cámara.<br>${e.message}</p>`;
-  }
-}
-
-document.addEventListener('keydown', e => {
-  if (e.code === 'Space') { e.preventDefault(); nextState(); }
-  if (e.code === 'KeyA') toggleAuto();
+// Configurar MediaPipe Hands
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.5
+});
+hands.onResults(onResults);
 
-start();
+// Iniciar cámara
+const camera = new Camera(video, {
+  onFrame: async () => { await hands.send({ image: video }); },
+  width: W, height: H
+});
+camera.start().then(() => statusEl.textContent = 'buscando mano...');
+
+// Limpiar con ESPACIO
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    dctx.fillStyle = '#000';
+    dctx.fillRect(0, 0, W, H);
+    lastX = null; lastY = null;
+  }
+});
 </script>
 </body>
 </html>
