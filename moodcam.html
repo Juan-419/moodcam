@@ -441,7 +441,13 @@ async function analyze() {
       .withAgeAndGender();
 
     if (!result) {
-      statusEl.textContent = '⚠ no se detectó ninguna cara, intenta de nuevo';
+      resultTitle.textContent = 'CARA NO DETECTADA';
+      resultTitle.style.color = '#ff4040';
+      resultFrase.textContent = 'Asegúrate de estar frente a la cámara con buena iluminación e intenta de nuevo.';
+      colorbar.style.background = '#ff4040';
+      camWrap.style.borderColor = '#ff4040';
+      emotionBar.style.display = 'none';
+      statusEl.textContent = '⚠ excepción: no se detectó ninguna cara';
       analyzing = false;
       analyzeBtn.disabled = false;
       analyzeBtn.innerHTML = '<i class="ti ti-bolt"></i> ANALIZAR';
