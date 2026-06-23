@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MoodCam</title>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,7 +17,6 @@
       --border: #2a2a2a;
       --accent: #c8ff00;
       --roast: #ff4040;
-      --radius: 12px;
     }
 
     body {
@@ -30,7 +30,6 @@
       padding: 24px 16px 40px;
     }
 
-    /* ── Header ── */
     header {
       width: 100%;
       max-width: 900px;
@@ -64,53 +63,30 @@
       transition: all 0.15s;
     }
     .mode-btn.active-mood  { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
-    .mode-btn.active-roast { background: var(--roast);  color: #fff;    border-color: var(--roast);  }
+    .mode-btn.active-roast { background: var(--roast);  color: #fff;    border-color: var(--roast); }
 
-    /* ── API Key ── */
-    .key-row {
+    .loading-bar {
       width: 100%;
       max-width: 900px;
-      display: flex;
-      gap: 8px;
-      margin-bottom: 6px;
-    }
-
-    #mc-key {
-      flex: 1;
-      font-family: inherit;
-      font-size: 13px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
       background: var(--panel);
-      color: var(--text);
-      outline: none;
-    }
-    #mc-key:focus { border-color: var(--accent); }
-
-    .key-save-btn {
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 8px 16px;
-      border-radius: 8px;
       border: 1px solid var(--border);
-      background: transparent;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 12px;
       color: var(--muted);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .key-save-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-    .key-hint {
-      font-size: 11px;
-      color: var(--muted);
-      max-width: 900px;
-      width: 100%;
       margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
+    .loading-bar .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
-    /* ── Main grid ── */
     .main {
       width: 100%;
       max-width: 900px;
@@ -118,16 +94,12 @@
       grid-template-columns: 1fr 270px;
       gap: 16px;
     }
+    @media (max-width: 640px) { .main { grid-template-columns: 1fr; } }
 
-    @media (max-width: 640px) {
-      .main { grid-template-columns: 1fr; }
-    }
-
-    /* ── Camera ── */
     .cam-wrap {
       position: relative;
       background: #000;
-      border-radius: var(--radius);
+      border-radius: 12px;
       overflow: hidden;
       aspect-ratio: 4/3;
       border: 2px solid var(--accent);
@@ -135,14 +107,19 @@
     }
 
     #mc-video {
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       object-fit: cover;
       display: block;
       transform: scaleX(-1);
     }
 
-    #mc-canvas { display: none; }
+    #mc-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      transform: scaleX(-1);
+      pointer-events: none;
+    }
 
     .cam-overlay {
       position: absolute;
@@ -157,10 +134,9 @@
       line-height: 1.7;
     }
 
-    /* ── Panel ── */
     .panel {
       background: var(--panel);
-      border-radius: var(--radius);
+      border-radius: 12px;
       border: 1px solid var(--border);
       padding: 20px;
       display: flex;
@@ -195,6 +171,17 @@
       font-style: italic;
     }
 
+    #emotion-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .emo-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+    .emo-track { flex: 1; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .emo-fill { height: 100%; border-radius: 99px; background: var(--accent); transition: width 0.3s; }
+    .emo-label { width: 70px; }
+    .emo-val { width: 32px; text-align: right; }
+
     #colorbar {
       height: 5px;
       border-radius: 99px;
@@ -219,6 +206,7 @@
     .action-btn:hover:not(:disabled) { opacity: 0.9; }
     .action-btn:active:not(:disabled) { transform: scale(0.98); }
     .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .action-btn.roast-style { background: var(--roast); color: #fff; }
 
     #status {
       font-size: 11px;
@@ -227,7 +215,6 @@
       min-height: 16px;
     }
 
-    /* ── Footer ── */
     footer {
       margin-top: 28px;
       font-size: 11px;
@@ -236,227 +223,288 @@
       letter-spacing: 1px;
     }
 
-    /* ── Flash animation ── */
     @keyframes flash { 0%{opacity:1} 50%{opacity:0.2} 100%{opacity:1} }
     .flash { animation: flash 0.35s ease; }
   </style>
 </head>
 <body>
 
-  <!-- Header -->
-  <header>
-    <span id="mc-title">MOODCAM</span>
-    <div class="modes">
-      <button class="mode-btn active-mood" id="btn-mood" onclick="setMode('mood')">
-        <i class="ti ti-sparkles"></i> MOOD
-      </button>
-      <button class="mode-btn" id="btn-roast" onclick="setMode('roast')">
-        <i class="ti ti-ghost-2"></i> AGE ROAST
-      </button>
-    </div>
-  </header>
-
-  <!-- API Key -->
-  <div class="key-row">
-    <input id="mc-key" type="password" placeholder="sk-ant-...  (Anthropic API Key)" />
-    <button class="key-save-btn" onclick="saveKey()">
-      <i class="ti ti-check"></i> Guardar
+<header>
+  <span id="mc-title">MOODCAM</span>
+  <div class="modes">
+    <button class="mode-btn active-mood" id="btn-mood" onclick="setMode('mood')">
+      <i class="ti ti-sparkles"></i> MOOD
+    </button>
+    <button class="mode-btn" id="btn-roast" onclick="setMode('roast')">
+      <i class="ti ti-ghost-2"></i> AGE ROAST
     </button>
   </div>
-  <p class="key-hint">La key solo se guarda en memoria del navegador — no se envía a ningún servidor externo.</p>
+</header>
 
-  <!-- Main -->
-  <div class="main">
-    <div class="cam-wrap" id="cam-wrap">
-      <video id="mc-video" autoplay playsinline muted></video>
-      <canvas id="mc-canvas"></canvas>
-      <div class="cam-overlay" id="cam-overlay">
-        haz clic en <strong style="color:#fff">&nbsp;iniciar cámara&nbsp;</strong> para comenzar
-      </div>
-    </div>
+<div class="loading-bar" id="loading-bar">
+  <div class="dot"></div>
+  <span id="loading-txt">cargando modelos de IA...</span>
+</div>
 
-    <div class="panel">
-      <span class="panel-label" id="panel-label">tu vibe ahora mismo</span>
-      <div id="result-title">—</div>
-      <div class="divider"></div>
-      <div id="result-frase"></div>
-      <div id="colorbar"></div>
-
-      <button class="action-btn" id="cam-btn" onclick="startCam()">
-        <i class="ti ti-camera"></i> INICIAR CÁMARA
-      </button>
-      <button class="action-btn" id="analyze-btn" style="display:none" onclick="analyze()">
-        <i class="ti ti-bolt"></i> ANALIZAR
-      </button>
-
-      <div id="status"></div>
+<div class="main">
+  <div class="cam-wrap" id="cam-wrap">
+    <video id="mc-video" autoplay playsinline muted></video>
+    <canvas id="mc-canvas"></canvas>
+    <div class="cam-overlay" id="cam-overlay">
+      esperando modelos...
     </div>
   </div>
 
-  <footer>ESPACIO para analizar &nbsp;·&nbsp; hecho con Claude API</footer>
+  <div class="panel">
+    <span class="panel-label" id="panel-label">tu vibe ahora mismo</span>
+    <div id="result-title">—</div>
+    <div class="divider"></div>
+    <div id="result-frase"></div>
 
-  <script>
-    let mode = 'mood';
-    let apiKey = '';
-    let analyzing = false;
+    <div id="emotion-bar" style="display:none">
+      <div class="emo-row"><span class="emo-label">feliz</span><div class="emo-track"><div class="emo-fill" id="bar-happy" style="width:0%"></div></div><span class="emo-val" id="val-happy">0%</span></div>
+      <div class="emo-row"><span class="emo-label">neutral</span><div class="emo-track"><div class="emo-fill" id="bar-neutral" style="width:0%;background:#888"></div></div><span class="emo-val" id="val-neutral">0%</span></div>
+      <div class="emo-row"><span class="emo-label">triste</span><div class="emo-track"><div class="emo-fill" id="bar-sad" style="width:0%;background:#6699ff"></div></div><span class="emo-val" id="val-sad">0%</span></div>
+      <div class="emo-row"><span class="emo-label">enojado</span><div class="emo-track"><div class="emo-fill" id="bar-angry" style="width:0%;background:#ff4040"></div></div><span class="emo-val" id="val-angry">0%</span></div>
+      <div class="emo-row"><span class="emo-label">sorprendido</span><div class="emo-track"><div class="emo-fill" id="bar-surprised" style="width:0%;background:#ffaa00"></div></div><span class="emo-val" id="val-surprised">0%</span></div>
+    </div>
 
-    const ACCENT = '#c8ff00';
-    const ROAST  = '#ff4040';
+    <div id="colorbar"></div>
 
-    const camWrap     = document.getElementById('cam-wrap');
-    const video       = document.getElementById('mc-video');
-    const canvas      = document.getElementById('mc-canvas');
-    const overlay     = document.getElementById('cam-overlay');
-    const camBtn      = document.getElementById('cam-btn');
-    const analyzeBtn  = document.getElementById('analyze-btn');
-    const resultTitle = document.getElementById('result-title');
-    const resultFrase = document.getElementById('result-frase');
-    const colorbar    = document.getElementById('colorbar');
-    const statusEl    = document.getElementById('status');
-    const panelLabel  = document.getElementById('panel-label');
-    const mcTitle     = document.getElementById('mc-title');
+    <button class="action-btn" id="cam-btn" onclick="startCam()" disabled>
+      <i class="ti ti-camera"></i> INICIAR CÁMARA
+    </button>
+    <button class="action-btn" id="analyze-btn" style="display:none" onclick="analyze()">
+      <i class="ti ti-bolt"></i> ANALIZAR
+    </button>
 
-    function setAccent(color) {
-      camWrap.style.borderColor     = color;
-      analyzeBtn.style.background   = color;
-      analyzeBtn.style.color        = color === ACCENT ? '#0a0a0a' : '#fff';
-      resultTitle.style.color       = color;
+    <div id="status"></div>
+  </div>
+</div>
+
+<footer>ESPACIO para analizar &nbsp;·&nbsp; IA 100% local, sin API key</footer>
+
+<script>
+const MODELS_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+
+const MOOD_DATA = {
+  happy: {
+    moods: ['CEO del buen rollo', 'Iluminado de jueves', 'Campeón sin trofeo', 'Gerente de la felicidad', 'Optimista profesional'],
+    frases: ['"Irradias una energía que ni el sol entiende."', '"Tu cara dice que ganaste algo que nadie más jugó."', '"Felicidad sospechosa detectada. Investigando."', '"Sonríes como el que sabe algo que los demás no."'],
+    color: '#c8ff00'
+  },
+  sad: {
+    moods: ['Filósofo a las 3am', 'Poeta sin papel', 'Sobreviviente del domingo', 'Melancólico con wifi', 'Reflexivo sin motivo'],
+    frases: ['"Cargas el peso de preguntas que nadie hizo."', '"Tu expresión grita existencialismo en voz baja."', '"La melancolía también es un estado productivo."', '"Ves el mundo en HD pero en escala de grises."'],
+    color: '#6699ff'
+  },
+  angry: {
+    moods: ['Guerrero del lunes gris', 'Vengador de reuniones largas', 'Justiciero sin capa', 'Ejecutivo del caos', 'Armado de razones'],
+    frases: ['"Tu mirada podría cancelar reuniones."', '"Energía de alguien que tenía razón y nadie escuchó."', '"El fuego interior se nota. Mucho."', '"Nivel de paciencia: agotado. Nivel de determinación: infinito."'],
+    color: '#ff4040'
+  },
+  surprised: {
+    moods: ['Testigo de algo raro', 'Descubridor accidental', 'Sorprendido con razón', 'Explorador de lo inesperado', 'En modo revelación'],
+    frases: ['"Tu cara registró algo que el cerebro aún procesa."', '"Energía de alguien que acaba de entender el universo."', '"Sorpresa nivel: existencial."', '"La vida te mostró algo sin previo aviso. Otra vez."'],
+    color: '#ffaa00'
+  },
+  neutral: {
+    moods: ['CEO de la nada absoluta', 'Observador del caos', 'Estratega en modo espera', 'Maestro del poker face', 'Sabio en silencio'],
+    frases: ['"Tu calma es una declaración filosófica."', '"Neutro no significa vacío. Significa listo."', '"La indiferencia también es una postura de poder."', '"Miras el mundo y decides no opinar. Por ahora."'],
+    color: '#aaaaaa'
+  },
+  fearful: {
+    moods: ['Alerta máxima activa', 'Detector de peligros invisibles', 'Precavido con razón', 'Estratega defensivo', 'Superviviente instintivo'],
+    frases: ['"Tu sexto sentido está trabajando horas extra."', '"Hay algo en el ambiente. Tú ya lo sientes."', '"Precaución: la forma más inteligente del valor."', '"El instinto no miente. Escúchalo."'],
+    color: '#cc88ff'
+  },
+  disgusted: {
+    moods: ['Crítico sin filtro', 'Árbitro del mal gusto', 'Detector de mediocridad', 'Estándar muy alto', 'Juez en sesión'],
+    frases: ['"Tu cara tiene estándares y no los baja."', '"Ves algo y tu rostro dice lo que la boca no dice."', '"El desacuerdo también es una forma de respeto."', '"Tus expectativas son altas. Bien.\"'],
+    color: '#88cc44'
+  }
+};
+
+const ROAST_DATA = [
+  // [min_age, max_age, roasts[]]
+  [0,  17, ['"Muy joven para esto. Vuelve cuando tengas problemas de verdad."', '"Años de vida: {age}. Años de crisis existencial: {age}."', '"A los {age} años aún no sabes lo que te espera. Disfruta."']],
+  [18, 24, ['"Con {age} años y ya en internet a esta hora. Productivo."', '"Tienes {age} años. Suficiente para saber, poco para arrepentirte."', '"{age} años: la edad en que todo parece urgente y nada lo es."']],
+  [25, 30, ['"Los temidos {age}. El cuerpo sigue igual, la energía ya no."', '"A los {age} ya deberías tenerlo todo claro. ¿Lo tienes?"', '"Con {age} ya dices \'es que estoy cansado\' con demasiada frecuencia."']],
+  [31, 40, ['"Los {age}: demasiado mayor para irresponsable, muy joven para sensato."', '"A los {age} el cuerpo manda facturas que el alma no pidió."', '"{age} años: cuando empiezas a entender a tus padres. Qué horror."']],
+  [41, 55, ['"Los {age}: experiencia infinita, rodillas finitas."', '"A los {age} ya sabes que la sabiduría duele un poco."', '"{age} años de sobrevivir. Eso merece reconocimiento."']],
+  [56, 99, ['"Los {age} son solo un número. Un número grande, pero solo un número."', '"Con {age} años has visto suficiente para escribir un libro. Escríbelo."', '"{age} años: suficiente historia para asustar a cualquiera."']]
+];
+
+let mode = 'mood';
+let modelsLoaded = false;
+let analyzing = false;
+
+const camWrap     = document.getElementById('cam-wrap');
+const video       = document.getElementById('mc-video');
+const canvas      = document.getElementById('mc-canvas');
+const overlay     = document.getElementById('cam-overlay');
+const camBtn      = document.getElementById('cam-btn');
+const analyzeBtn  = document.getElementById('analyze-btn');
+const resultTitle = document.getElementById('result-title');
+const resultFrase = document.getElementById('result-frase');
+const colorbar    = document.getElementById('colorbar');
+const statusEl    = document.getElementById('status');
+const panelLabel  = document.getElementById('panel-label');
+const mcTitle     = document.getElementById('mc-title');
+const loadingBar  = document.getElementById('loading-bar');
+const loadingTxt  = document.getElementById('loading-txt');
+const emotionBar  = document.getElementById('emotion-bar');
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-mood').className  = 'mode-btn' + (m === 'mood'  ? ' active-mood'  : '');
+  document.getElementById('btn-roast').className = 'mode-btn' + (m === 'roast' ? ' active-roast' : '');
+
+  const isMood = m === 'mood';
+  const accent = isMood ? '#c8ff00' : '#ff4040';
+
+  mcTitle.textContent    = isMood ? 'MOODCAM' : 'AGE ROAST';
+  mcTitle.style.color    = accent;
+  panelLabel.textContent = isMood ? 'tu vibe ahora mismo' : 'tu edad estimada';
+  camWrap.style.borderColor = accent;
+
+  if (analyzeBtn.style.display !== 'none') {
+    analyzeBtn.className = isMood ? 'action-btn' : 'action-btn roast-style';
+  }
+
+  resultTitle.textContent   = '—';
+  resultTitle.style.color   = accent;
+  resultFrase.textContent   = '';
+  colorbar.style.background = 'var(--border)';
+  emotionBar.style.display  = 'none';
+  statusEl.textContent      = '';
+}
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function getRoastForAge(age) {
+  for (const [min, max, roasts] of ROAST_DATA) {
+    if (age >= min && age <= max) {
+      return pick(roasts).replace(/{age}/g, age);
     }
-    setAccent(ACCENT);
+  }
+  return `"${age} años. Cada uno con su historia."`;
+}
 
-    function saveKey() {
-      apiKey = document.getElementById('mc-key').value.trim();
-      statusEl.textContent = apiKey ? '✓ key guardada' : 'ingresa tu API key';
-    }
+async function loadModels() {
+  loadingTxt.textContent = 'cargando modelos de IA... (primera vez puede tardar unos segundos)';
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODELS_URL),
+      faceapi.nets.ageGenderNet.loadFromUri(MODELS_URL),
+    ]);
+    modelsLoaded = true;
+    loadingBar.style.background = '#0d200d';
+    loadingBar.style.borderColor = '#1a4a1a';
+    loadingTxt.textContent = '✓ modelos listos — sin API key, 100% local';
+    loadingBar.querySelector('.dot').style.animationPlayState = 'paused';
+    loadingBar.querySelector('.dot').style.background = '#c8ff00';
+    camBtn.disabled = false;
+    overlay.textContent = 'haz clic en iniciar cámara para comenzar';
+  } catch(e) {
+    loadingTxt.textContent = '⚠ error cargando modelos: ' + e.message;
+  }
+}
 
-    function setMode(m) {
-      mode = m;
-      document.getElementById('btn-mood').className  = 'mode-btn' + (m === 'mood'  ? ' active-mood'  : '');
-      document.getElementById('btn-roast').className = 'mode-btn' + (m === 'roast' ? ' active-roast' : '');
-      if (m === 'mood') {
-        setAccent(ACCENT);
-        panelLabel.textContent = 'tu vibe ahora mismo';
-        mcTitle.textContent    = 'MOODCAM';
-        mcTitle.style.color    = ACCENT;
-      } else {
-        setAccent(ROAST);
-        panelLabel.textContent = 'tu edad estimada';
-        mcTitle.textContent    = 'AGE ROAST';
-        mcTitle.style.color    = ROAST;
-      }
-      resultTitle.textContent   = '—';
-      resultFrase.textContent   = '';
-      colorbar.style.background = 'var(--border)';
-      statusEl.textContent      = '';
-    }
+async function startCam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    overlay.style.display  = 'none';
+    camBtn.style.display   = 'none';
+    analyzeBtn.style.display = 'block';
+    analyzeBtn.className = mode === 'mood' ? 'action-btn' : 'action-btn roast-style';
+    statusEl.textContent = 'cámara lista — presiona analizar';
+  } catch(e) {
+    statusEl.textContent = '⚠ no se pudo acceder a la cámara';
+  }
+}
 
-    async function startCam() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-        video.srcObject = stream;
-        overlay.style.display  = 'none';
-        camBtn.style.display   = 'none';
-        analyzeBtn.style.display = 'block';
-        statusEl.textContent   = 'cámara lista';
-      } catch(e) {
-        statusEl.textContent = '⚠ no se pudo acceder a la cámara';
-      }
-    }
+async function analyze() {
+  if (analyzing || !modelsLoaded) return;
+  analyzing = true;
+  analyzeBtn.disabled = true;
+  analyzeBtn.innerHTML = '<i class="ti ti-loader"></i> detectando...';
+  statusEl.textContent = 'analizando tu cara...';
 
-    function captureFrame() {
-      canvas.width  = video.videoWidth  || 640;
-      canvas.height = video.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0);
-      return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    }
+  try {
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+    const result = await faceapi.detectSingleFace(video, options)
+      .withFaceExpressions()
+      .withAgeAndGender();
 
-    async function analyze() {
-      if (analyzing) return;
-      if (!apiKey) { statusEl.textContent = '⚠ guarda tu API key primero'; return; }
-
-      analyzing = true;
-      analyzeBtn.disabled = true;
-      analyzeBtn.innerHTML = '<i class="ti ti-loader"></i> analizando...';
-      statusEl.textContent = '🤔 pensando...';
-
-      const b64 = captureFrame();
-
-      const MOOD_PROMPT = `Eres un analizador de vibes dramático y creativo.
-Mira esta imagen y responde SOLO con este JSON (sin markdown, sin texto extra):
-{"mood":"<nombre dramático del mood en 3-5 palabras en español, estilo épico o absurdo>","frase":"<frase filosófica o absurda de máx 15 palabras>","color":"<color hex que represente ese mood>"}
-Ejemplos de mood: "Guerrero del lunes gris", "CEO de la nada absoluta", "Filósofo a las 3am", "Superviviente del wifi lento". Solo el JSON.`;
-
-      const ROAST_PROMPT = `Eres un estimador de edad sarcástico e irreverente.
-Mira esta imagen y responde SOLO con este JSON (sin markdown, sin texto extra):
-{"edad_estimada":<número entero>,"roast":"<roast divertido y mordaz de máx 20 palabras en español, menciona la edad estimada>"}
-Solo el JSON.`;
-
-      try {
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true'
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 300,
-            messages: [{
-              role: 'user',
-              content: [
-                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-                { type: 'text', text: mode === 'mood' ? MOOD_PROMPT : ROAST_PROMPT }
-              ]
-            }]
-          })
-        });
-
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error?.message || 'API error');
-
-        let raw = data.content[0].text.trim().replace(/```json|```/g, '').trim();
-        const parsed = JSON.parse(raw);
-
-        resultTitle.classList.remove('flash');
-        void resultTitle.offsetWidth;
-        resultTitle.classList.add('flash');
-
-        if (mode === 'mood') {
-          const color = parsed.color || ACCENT;
-          resultTitle.textContent   = (parsed.mood || '???').toUpperCase();
-          resultTitle.style.color   = color;
-          resultFrase.textContent   = '"' + (parsed.frase || '') + '"';
-          colorbar.style.background = color;
-          camWrap.style.borderColor = color;
-        } else {
-          resultTitle.textContent   = (parsed.edad_estimada || '??') + ' AÑOS';
-          resultTitle.style.color   = ROAST;
-          resultFrase.textContent   = '"' + (parsed.roast || '') + '"';
-          colorbar.style.background = ROAST;
-          camWrap.style.borderColor = ROAST;
-        }
-        statusEl.textContent = '✓ listo';
-
-      } catch(e) {
-        statusEl.textContent = '⚠ ' + (e.message || 'algo salió mal').slice(0, 60);
-      }
-
+    if (!result) {
+      statusEl.textContent = '⚠ no se detectó ninguna cara, intenta de nuevo';
       analyzing = false;
       analyzeBtn.disabled = false;
       analyzeBtn.innerHTML = '<i class="ti ti-bolt"></i> ANALIZAR';
+      return;
     }
 
-    document.addEventListener('keydown', e => {
-      if (e.code === 'Space' && analyzeBtn.style.display !== 'none') {
-        e.preventDefault();
-        analyze();
+    const expressions = result.expressions;
+    const age = Math.round(result.age);
+
+    resultTitle.classList.remove('flash');
+    void resultTitle.offsetWidth;
+    resultTitle.classList.add('flash');
+
+    if (mode === 'mood') {
+      // Encontrar emoción dominante
+      const dominant = Object.entries(expressions).sort((a,b) => b[1]-a[1])[0][0];
+      const data = MOOD_DATA[dominant] || MOOD_DATA.neutral;
+
+      resultTitle.textContent   = pick(data.moods).toUpperCase();
+      resultTitle.style.color   = data.color;
+      resultFrase.textContent   = pick(data.frases);
+      colorbar.style.background = data.color;
+      camWrap.style.borderColor = data.color;
+
+      // Mostrar barras de emoción
+      emotionBar.style.display = 'flex';
+      const map = { happy:'happy', neutral:'neutral', sad:'sad', angry:'angry', surprised:'surprised' };
+      for (const [key, id] of Object.entries(map)) {
+        const pct = Math.round((expressions[key] || 0) * 100);
+        document.getElementById('bar-' + id).style.width = pct + '%';
+        document.getElementById('val-' + id).textContent = pct + '%';
       }
-    });
-  </script>
+    } else {
+      // Age roast
+      const roast = getRoastForAge(age);
+      resultTitle.textContent   = age + ' AÑOS';
+      resultTitle.style.color   = '#ff4040';
+      resultFrase.textContent   = roast;
+      colorbar.style.background = '#ff4040';
+      camWrap.style.borderColor = '#ff4040';
+      emotionBar.style.display  = 'none';
+    }
+
+    statusEl.textContent = '✓ listo';
+
+  } catch(e) {
+    statusEl.textContent = '⚠ ' + (e.message || 'algo salió mal').slice(0, 60);
+  }
+
+  analyzing = false;
+  analyzeBtn.disabled = false;
+  analyzeBtn.innerHTML = '<i class="ti ti-bolt"></i> ANALIZAR';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && analyzeBtn.style.display !== 'none') {
+    e.preventDefault();
+    analyze();
+  }
+});
+
+loadModels();
+</script>
 </body>
 </html>
+HTMLEOF
