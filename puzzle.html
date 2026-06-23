@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Puzzle Cam — Simple</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: monospace; color: #fff; }
+    canvas { border: 1px solid #333; }
+    #info { margin-top: 12px; font-size: 13px; color: #555; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="640" height="480"></canvas>
+  <div id="info">presiona ESPACIO para cambiar efecto</div>
+
+  <!-- Canvas oculto donde se dibuja la webcam -->
+  <video id="v" autoplay playsinline muted style="display:none"></video>
+  <canvas id="src" width="640" height="480" style="display:none"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    const video  = document.getElementById('v');
+    const src    = document.getElementById('src');
+    const sctx   = src.getContext('2d');
+
+    const W = 640, H = 480;
+    const COLS = 10, ROWS = 10;
+    const BW = W / COLS, BH = H / ROWS;
+
+    // Estados: 0=normal, 1=explode, 2=shuffle, 3=recompose
+    let state = 0;
+    let blocks = [];
+    let timer = 0;
+
+    // Inicializar bloques
+    function initBlocks() {
+      blocks = [];
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          blocks.push({
+            // Posición original en la imagen
+            srcX: c * BW, srcY: r * BH,
+            // Posición actual (animada)
+            x: c * BW, y: r * BH,
+            // Posición destino
+            tx: c * BW, ty: r * BH,
+            // Rotación y escala
+            rot: 0, trot: 0,
+            scale: 1, tscale: 1,
+            // Opacidad
+            alpha: 1
+          });
+        }
+      }
+    }
+
+    // Interpolación lineal
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    // Cambiar estado
+    function nextState() {
+      state = (state + 1) % 4;
+      timer = 0;
+
+      if (state === 1) { // EXPLODE — bloques salen volando
+        blocks.forEach(b => {
+          b.tx = (Math.random() - 0.5) * W * 2 + W/2;
+          b.ty = (Math.random() - 0.5) * H * 2 + H/2;
+          b.trot = (Math.random() - 0.5) * Math.PI * 2;
+          b.tscale = Math.random() * 1.5 + 0.2;
+        });
+      } else if (state === 2) { // SHUFFLE — reorganizar aleatoriamente
+        const positions = blocks.map(b => ({ x: b.srcX, y: b.srcY }));
+        // Mezclar posiciones
+        for (let i = positions.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [positions[i], positions[j]] = [positions[j], positions[i]];
+        }
+        blocks.forEach((b, i) => {
+          b.tx = positions[i].x;
+          b.ty = positions[i].y;
+          b.trot = 0;
+          b.tscale = 1;
+        });
+      } else if (state === 3) { // RECOMPOSE — volver al lugar
+        blocks.forEach(b => {
+          b.tx = b.srcX;
+          b.ty = b.srcY;
+          b.trot = 0;
+          b.tscale = 1;
+        });
+      } else { // NORMAL
+        blocks.forEach(b => {
+          b.tx = b.srcX; b.ty = b.srcY;
+          b.trot = 0; b.tscale = 1;
+        });
+      }
+    }
+
+    const stateNames = ['NORMAL', 'EXPLODE', 'SHUFFLE', 'RECOMPOSE'];
+
+    function draw() {
+      // Capturar frame de la webcam
+      sctx.save();
+      sctx.translate(W, 0);
+      sctx.scale(-1, 1); // espejo
+      sctx.drawImage(video, 0, 0, W, H);
+      sctx.restore();
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+
+      const speed = state === 3 ? 0.08 : 0.06;
+
+      blocks.forEach(b => {
+        // Interpolar posición
+        b.x = lerp(b.x, b.tx, speed);
+        b.y = lerp(b.y, b.ty, speed);
+        b.rot = lerp(b.rot, b.trot, speed);
+        b.scale = lerp(b.scale, b.tscale, speed);
+
+        ctx.save();
+        ctx.translate(b.x + BW/2, b.y + BH/2);
+        ctx.rotate(b.rot);
+        ctx.scale(b.scale, b.scale);
+
+        // En estado shuffle — blanco y negro
+        if (state === 2) ctx.filter = 'grayscale(1) contrast(1.2)';
+
+        ctx.drawImage(src, b.srcX, b.srcY, BW, BH, -BW/2, -BH/2, BW, BH);
+        ctx.filter = 'none';
+
+        // Borde del bloque
+        if (state !== 0) {
+          ctx.strokeStyle = state === 1 ? 'rgba(255,200,0,0.4)' : 'rgba(0,255,200,0.3)';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(-BW/2, -BH/2, BW, BH);
+        }
+
+        ctx.restore();
+      });
+
+      // HUD
+      timer++;
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText(stateNames[state], 12, 24);
+
+      // Cambio automático de estado cada ~120 frames
+      if (timer > 120) nextState();
+
+      requestAnimationFrame(draw);
+    }
+
+    // Iniciar cámara
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: W, height: H }, audio: false });
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        initBlocks();
+        draw();
+      } catch(e) {
+        document.getElementById('info').textContent = 'Error: no se pudo acceder a la cámara';
+      }
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space') { e.preventDefault(); nextState(); }
+    });
+
+    start();
+  </script>
+</body>
+</html>
